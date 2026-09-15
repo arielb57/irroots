@@ -1,0 +1,38 @@
+{
+  "name": "irroots",
+  "version": "0.1.0",
+  "description": "Find every IRR of a cash flow, or prove there is none, using exact root isolation instead of Newton's method",
+  "license": "MIT",
+  "author": "Ariel Belhamou",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "irroots": "dist/src/cli.js"
+  },
+  "files": [
+    "dist/src"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "bench": "npm run build && node dist/bench/bench.js"
+  },
+  "keywords": [
+    "irr",
+    "finance",
+    "npv",
+    "root-isolation",
+    "descartes",
+    "polynomial"
+  ],
+  "devDependencies": {
+    "@types/node": "20.19.0",
+    "fast-check": "4.3.0",
+    "typescript": "5.9.3"
+  }
+}
