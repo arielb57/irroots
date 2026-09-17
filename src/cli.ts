@@ -4,15 +4,18 @@ import { fileURLToPath } from "node:url";
 import { findIrrs, mirr, newtonIrr, type IrrResult } from "./irr.js";
 import { generateFlows } from "./generate.js";
 import { parseFlowsText } from "./input.js";
+import { findXirrs, type DatedFlow } from "./xirr.js";
 import { parseDecimal, toFixedCeil, toFixedFloor, toNumber, toString } from "./rational.js";
 
 const USAGE = `usage:
   irroots [FILE | -] [--flows c0,c1,...] [--precision 1e-12]
           [--finance-rate R --reinvest-rate R] [--compare-newton] [--json]
   irroots generate --roots r1,r2,... --periods N [--seed S]
+  irroots xirr FILE [--precision 1e-9] [--json]
 
 FILE holds one cash flow per line (or "period,amount"); "-" reads stdin.
-Rates are decimals: 0.1 means 10%.`;
+For xirr, each line is "YYYY-MM-DD,amount" or "days,amount" from the first date.
+Rates are decimals: 0.1 means 10%. xirr rates are annual, ACT/365.`;
 
 class UsageError extends Error {}
 
@@ -109,6 +112,10 @@ export function main(argv: string[]): { code: number; stdout: string; stderr: st
       return { code: 0, stdout: flows.join("\n"), stderr: "" };
     }
 
+    if (positional[0] === "xirr") {
+      return runXirr(positional.slice(1), flags);
+    }
+
     const flows = readInput(positional, flags);
     const precisionText = stringFlag(flags, "--precision") ?? "1e-12";
     const result = findIrrs(flows, { precision: precisionText });
@@ -177,4 +184,69 @@ if (invokedDirectly) {
   if (stdout) process.stdout.write(`${stdout}\n`);
   if (stderr) process.stderr.write(`${stderr}\n`);
   process.exitCode = code;
+}
+
+/** Days from the first date, for "YYYY-MM-DD" or a plain day count. */
+function dayOf(token: string, first: string): number {
+  if (/^\d+$/.test(token)) return Number(token);
+  const day = Date.parse(`${token}T00:00:00Z`);
+  const base = Date.parse(`${first}T00:00:00Z`);
+  if (Number.isNaN(day) || Number.isNaN(base)) throw new UsageError(`not a date or day count: ${token}`);
+  return Math.round((day - base) / 86_400_000);
+}
+
+function runXirr(
+  positional: string[],
+  flags: Map<string, string | true>,
+): { code: number; stdout: string; stderr: string } {
+  const text = positional[0] === undefined || positional[0] === "-" ? readFileSync(0, "utf8") : readFileSync(positional[0], "utf8");
+  const rows = text
+    .split("\n")
+    .map((l) => l.replace(/#.*$/, "").trim())
+    .filter((l) => l !== "")
+    .map((l) => l.split(","));
+  if (rows.length < 2) throw new UsageError("xirr needs at least two dated flows");
+  if (rows.some((r) => r.length !== 2)) throw new UsageError('each xirr line is "date,amount"');
+  const first = rows[0]![0]!.trim();
+  const flows: DatedFlow[] = rows.map((r) => ({
+    day: dayOf(r[0]!.trim(), first),
+    amount: parseDecimal(r[1]!.trim()),
+  }));
+
+  const precision = Number(stringFlag(flags, "--precision") ?? "1e-9");
+  const result = findXirrs(flows, precision);
+
+  if (flags.has("--json")) {
+    return {
+      code: 0,
+      stdout: `${JSON.stringify(
+        {
+          xirrs: result.roots.map((r) => ({ approx: r.rate, lo: toString(r.low), hi: toString(r.high) })),
+          signChanges: result.signChanges,
+          unique: result.unique,
+          complete: result.complete,
+        },
+        null,
+        2,
+      )}\n`,
+      stderr: "",
+    };
+  }
+
+  const lines: string[] = [];
+  lines.push(`${flows.length} dated flows over ${flows[flows.length - 1]!.day} days, ACT/365`);
+  lines.push(`sign changes: ${result.signChanges} (Descartes' upper bound on the number of XIRRs)`);
+  if (result.roots.length === 0) lines.push("no XIRR exists");
+  for (const r of result.roots) {
+    const exact = r.exact ? " (exact)" : "";
+    lines.push(`XIRR ${(100 * r.rate).toFixed(6)}%${exact}`);
+  }
+  lines.push(
+    result.unique
+      ? "unique: Norstrom's criterion proves this is the only one"
+      : result.complete
+        ? "complete: as many roots as the sign-change bound allows, so these are all of them"
+        : "not proven complete: fewer roots than the bound allows, so others may exist",
+  );
+  return { code: 0, stdout: `${lines.join("\n")}\n`, stderr: "" };
 }

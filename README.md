@@ -22,6 +22,40 @@ so the IRRs are exactly the positive real roots of that polynomial. irroots find
 
 Worked example: flows -1600, 10000, -10000 give P(x) = -1600 + 10000x - 10000x^2 (square-free). On (0, 1), Descartes gives a bound of 2, so the interval is split at 1/2. There P(1/2) = 900 ≠ 0, and each half has a bound of 1. The isolating intervals are (0, 1/2) and (1/2, 1). Refinement in rate space converges on 1/4 and 4, and both check exactly to zero: IRRs of 25% and 400%.
 
+## Irregular dates
+
+`irroots xirr` takes dated flows and reports annual rates on the ACT/365 convention, the one Excel's `XIRR` uses. It does not fall back on Newton.
+
+The trick is a substitution. Discounting by actual days means
+
+    NPV(r) = sum_i c_i (1 + r)^(-t_i / 365)
+
+whose exponents are fractional, so this is not a polynomial. Put `y = (1 + r)^(-1/365)` and it becomes `sum_i c_i y^(t_i)`, a sparse polynomial whose exponents are whole numbers of days. The return trip is what makes this worth doing rather than approximating: `r = y^(-365) - 1`, and a rational `y = p/q` gives `r = q^365 / p^365 - 1`, which is rational. No root is ever extracted, so a bracket in `y` becomes an exact bracket in the rate.
+
+```
+$ cat leap.csv
+2020-01-01,-1600
+2021-01-01,10000
+2022-01-01,-10000
+
+$ irroots xirr leap.csv
+3 dated flows over 731 days, ACT/365
+sign changes: 2 (Descartes' upper bound on the number of XIRRs)
+XIRR 25.025516%
+XIRR 397.076089%
+complete: as many roots as the sign-change bound allows, so these are all of them
+```
+
+Those are the two IRRs of the worked example above, moved off 25% and 400% because 2020 is a leap year and the flows sit 366 and 731 days apart rather than one and two years. Excel's `XIRR` returns one of them, chosen by its guess.
+
+Two things carry over from the polynomial path and one does not:
+
+- **Descartes' rule still bounds the count.** It holds for arbitrary real exponents, not only integers, so the sign changes in the flows bound the number of XIRRs exactly as they do for evenly spaced periods.
+- **Norstrom's criterion still proves uniqueness.** One sign change in the running total means exactly one positive root, which covers most real schedules — and the output says so rather than leaving it implied.
+- **The isolation is not certified.** The evenly spaced path proves it has found every root; the dated path brackets what it finds on a grid and reports `not proven complete` when it finds fewer than the bound allows. A pair of roots closer together than the grid can still hide, and the tool says that instead of implying otherwise.
+
+The grid is laid out in rate space rather than in `y`, which matters more than it sounds: `y` runs from 0 to infinity but every realistic rate is crammed against 1, and at `y = 0.99` the rate is already 3,820%. A grid with a sensible-looking step in `y` steps straight over the whole interesting range — and over both roots above, which then look like none at all.
+
 ## Install and usage
 
 Requires Node.js 20 or later.
@@ -164,7 +198,8 @@ The modular square-free test is a deliberate asymmetry. A degree-0 GCD modulo a 
 
 ## Limitations
 
-- Periods are evenly spaced integers. Irregular dates (XIRR) give non-integer exponents, which are not polynomials, and are not supported.
+- Irregular dates go through `irroots xirr`, which is exact in the same sense but proves less. The evenly spaced path certifies the root count with Descartes' rule on a shifted polynomial; shifting a degree-3,650 polynomial is not affordable, so the dated path certifies only when the sign-change bound is met or Norstrom's criterion applies, and says which. Floating point picks the grid points it probes; nothing it reports passes through a float.
+- `irroots xirr` costs about a second on a ten-year monthly schedule at `--precision 1e-9`, because a sign test raises a rational to the power of the day count. Short schedules are milliseconds.
 - Rates are per period and must be above -100%. There is no annualisation or day-count convention.
 - Irrational IRRs are reported as intervals plus a float midpoint. Exact rationals are recognised only when they are the simplest rational in the final interval, which in practice means denominators up to about 1/sqrt(precision).
 - A polynomial with repeated roots and many periods is slow: the table shows 23 ms at 60 periods, and the exact PRS GCD grows super-linearly beyond that. A modular GCD with reconstruction would fix this but is not implemented.
